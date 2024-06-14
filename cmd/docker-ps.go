@@ -7,10 +7,12 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// Initialize command
 func init() {
 	rootCmd.AddCommand(psCmd)
 }
 
+// Command defention
 var psCmd = &cobra.Command{
 	Use:   "ps",
 	Short: "List docker containers",
