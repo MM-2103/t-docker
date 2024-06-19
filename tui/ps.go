@@ -107,7 +107,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if output, err := c.CombinedOutput(); err != nil {
 						fmt.Printf("Error executing container: %s\nOutput: %s\n", err, string(output))
 					}
-					return nil
+					return refreshMsg{}
 				}
 			}
 		case "s":
@@ -118,28 +118,29 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if output, err := c.CombinedOutput(); err != nil {
 						fmt.Printf("Error stopping container: %s\nOutput: %s\n", err, string(output))
 					}
-					m.refreshTableData()
-					return nil
+					return refreshMsg{}
 				}
 			}
 		case "r":
 			if len(m.table.SelectedRow()) > 0 {
 				selectedID := strings.TrimSpace(m.table.SelectedRow()[0])
-				fmt.Printf("Attempting to restart container: '%s'\n", selectedID) // Debugging line
 				return m, func() tea.Msg {
 					c := exec.Command("docker", "restart", selectedID)
 					if output, err := c.CombinedOutput(); err != nil {
 						fmt.Printf("Error restarting container: %s\nOutput: %s\n", err, string(output))
 					}
-					m.refreshTableData()
-					return nil
+					return refreshMsg{}
 				}
 			}
 		}
+	case refreshMsg:
+		m.refreshTableData()
 	}
 	m.table, cmd = m.table.Update(msg)
 	return m, cmd
 }
+
+type refreshMsg struct{}
 
 func (m *model) refreshTableData() {
 	output, err := getDockerPSOutput()
@@ -154,21 +155,25 @@ func (m *model) refreshTableData() {
 }
 
 func (m model) View() string {
-	// Apply styles conditionally based on the Ports column just before rendering
 	styledRows := make([]table.Row, len(m.rows))
+	// Define the style for stopped containers
+	grayStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
 	for i, row := range m.rows {
-		if row[4] == "Exited" {
-			grayStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+		// Check the status
+		if strings.Contains(row[4], "Exited") || strings.Contains(row[4], "Stopped") {
 			styledRow := make(table.Row, len(row))
-			for j := range row {
-				styledRow[j] = grayStyle.Render(row[j])
+			for j, cell := range row {
+				// Apply grey style to each cell in the row
+				styledRow[j] = grayStyle.Render(cell)
 			}
 			styledRows[i] = styledRow
 		} else {
+			// Keep original style if not stopped
 			styledRows[i] = row
 		}
 	}
 
+	// Update the table rows with the styled rows for rendering
 	m.table.SetRows(styledRows)
 	return baseStyle.Render(m.table.View()) + "\n"
 }
@@ -206,11 +211,15 @@ func main() {
 		BorderForeground(lipgloss.Color("240")).
 		BorderBottom(true).
 		Bold(false)
+	s.Selected = s.Selected.
+		Foreground(lipgloss.Color("229")).
+		Background(lipgloss.Color("57")).
+		Bold(true)
 
 	m := model{table: t, rows: rows}
 	m.table.SetStyles(s)
 
-	if _, err := tea.NewProgram(m).Run(); err != nil {
+	if _, err := tea.NewProgram(&m).Run(); err != nil {
 		fmt.Println("Error running program:", err)
 		os.Exit(1)
 	}
