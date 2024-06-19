@@ -122,7 +122,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "r":
 			if len(m.table.SelectedRow()) > 0 {
 				return m, func() tea.Msg {
-					c := exec.Command("docker", "restart", m.table.SelectedRow()[0])
+					fmt.Printf("Starting container: '%s'\n", m.table.SelectedRow()[0]) // Debugging line
+					c := exec.Command("docker", "restart", fmt.Sprintf("'%s'", m.table.SelectedRow()[0]))
 					if output, err := c.CombinedOutput(); err != nil {
 						fmt.Printf("Error running container: %s\nOutput: %s\n", err, string(output))
 					}
