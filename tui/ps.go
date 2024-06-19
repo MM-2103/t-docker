@@ -1,10 +1,11 @@
-package tui
+package main
 
 import (
 	"fmt"
 	"os"
 	"os/exec"
 	"strings"
+	"syscall"
 
 	"github.com/charmbracelet/bubbles/table"
 	tea "github.com/charmbracelet/bubbletea"
@@ -99,15 +100,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "e":
 			if len(m.table.SelectedRow()) > 0 {
 				selectedID := strings.TrimSpace(m.table.SelectedRow()[0])
+				status := m.table.SelectedRow()[4] // Get the status of the selected container
+				if strings.Contains(status, "Exited") || strings.Contains(status, "Stopped") {
+					fmt.Println("Cannot execute a stopped container.")
+					return m, nil
+				}
 				return m, func() tea.Msg {
-					c := exec.Command("docker", "exec", "-it", selectedID, "bash")
-					c.Stdin = os.Stdin
-					c.Stdout = os.Stdout
-					c.Stderr = os.Stderr
-					if output, err := c.CombinedOutput(); err != nil {
-						fmt.Printf("Error executing container: %s\nOutput: %s\n", err, string(output))
-					}
-					return refreshMsg{}
+					// Suspend the program to allow the command to take over the terminal
+					_ = syscall.Exec("/usr/bin/docker", []string{"docker", "exec", "-it", selectedID, "bash"}, os.Environ())
+					return nil
 				}
 			}
 		case "s":
@@ -230,7 +231,7 @@ func main() {
 	m := model{table: t, rows: rows}
 	m.table.SetStyles(s)
 
-	if _, err := tea.NewProgram(&m).Run(); err != nil {
+	if _, err := tea.NewProgram(&m).Run(); err != nil { // Pass the address of `m` here
 		fmt.Println("Error running program:", err)
 		os.Exit(1)
 	}
