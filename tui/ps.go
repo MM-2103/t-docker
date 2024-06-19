@@ -97,9 +97,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		case "enter":
 			if len(m.table.SelectedRow()) > 0 {
-				containerName := m.table.SelectedRow()[6]
 				return m, func() tea.Msg {
-					c := exec.Command("docker", "exec", "-it", containerName, "bash")
+					c := exec.Command("docker", "exec", "-it", m.table.SelectedRow()[0], "bash")
 					c.Stdin = os.Stdin
 					c.Stdout = os.Stdout
 					c.Stderr = os.Stderr
@@ -112,9 +111,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "s":
 			if len(m.table.SelectedRow()) > 0 {
-				containerName := m.table.SelectedRow()[6]
 				return m, func() tea.Msg {
-					c := exec.Command("docker", "stop", containerName)
+					c := exec.Command("docker", "stop", m.table.SelectedRow()[0])
 					if output, err := c.CombinedOutput(); err != nil {
 						fmt.Printf("Error stopping container: %s\nOutput: %s\n", err, string(output))
 					}
@@ -123,10 +121,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "r":
 			if len(m.table.SelectedRow()) > 0 {
-				containerName := m.table.SelectedRow()[6]
-				fmt.Printf("Attempting to start container: %s\n", containerName)
 				return m, func() tea.Msg {
-					c := exec.Command("docker", "restart", containerName)
+					c := exec.Command("docker", "restart", m.table.SelectedRow()[0])
 					if output, err := c.CombinedOutput(); err != nil {
 						fmt.Printf("Error running container: %s\nOutput: %s\n", err, string(output))
 					}
