@@ -132,6 +132,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return refreshMsg{}
 				}
 			}
+		case "d":
+			if len(m.table.SelectedRow()) > 0 {
+				selectID := strings.TrimSpace(m.table.SelectedRow()[0])
+				return m, func() tea.Msg {
+					c := exec.Command("docker", "rm", "--volumes", selectID)
+					if output, err := c.CombinedOutput(); err != nil {
+						fmt.Printf("Error deleting container: %s\nOutput: %s\n", err, string(output))
+					}
+					return refreshMsg{}
+				}
+			}
 		}
 	case refreshMsg:
 		m.refreshTableData()
