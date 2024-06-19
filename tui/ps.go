@@ -1,9 +1,10 @@
-package main
+package tui
 
 import (
 	"fmt"
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 	"syscall"
 
@@ -11,6 +12,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
+
+var helpStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render
 
 var baseStyle = lipgloss.NewStyle().
 	BorderStyle(lipgloss.NormalBorder()).
@@ -82,6 +85,16 @@ func dockerPSToTableRows(dockerPSList []DockerPS) []table.Row {
 	return rows
 }
 
+// Extract the first host port from the port mapping string
+func extractPort(portMapping string) (string, error) {
+	re := regexp.MustCompile(`(\d+)->\d+/tcp`)
+	matches := re.FindStringSubmatch(portMapping)
+	if len(matches) < 2 {
+		return "", fmt.Errorf("no port found in %s", portMapping)
+	}
+	return matches[1], nil
+}
+
 func (m model) Init() tea.Cmd { return nil }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -139,10 +152,23 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, func() tea.Msg {
 					c := exec.Command("docker", "rm", "--volumes", selectID)
 					if output, err := c.CombinedOutput(); err != nil {
-						fmt.Printf("Error deleting container: %s\nOutput: %s\n", err, string(output))
+						fmt.Println("Error deleting container: ", string(output))
 					}
 					return refreshMsg{}
 				}
+			}
+		case "o":
+			if len(m.table.SelectedRow()) > 0 {
+				portMapping := m.table.SelectedRow()[5]
+				port, err := extractPort(portMapping)
+				if err != nil {
+					fmt.Printf("Error extracting port: %s\n", err)
+					return m, nil
+				}
+				url := fmt.Sprintf("http://localhost:%s", port)
+				exec.Command("xdg-open", url).Start()
+				return m, nil
+
 			}
 		}
 	case refreshMsg:
@@ -187,7 +213,11 @@ func (m model) View() string {
 
 	// Update the table rows with the styled rows for rendering
 	m.table.SetRows(styledRows)
-	return baseStyle.Render(m.table.View()) + "\n"
+	return baseStyle.Render(m.table.View()) + "\n" + m.helpView()
+}
+
+func (m model) helpView() string {
+	return helpStyle("\n  ↑/↓: Navigate • q: Quit • s: Stop • r: Restart/Start • d: Delete • o: Open in browser\n")
 }
 
 func main() {
@@ -206,7 +236,7 @@ func main() {
 		{Title: "Command", Width: 20},
 		{Title: "Created", Width: 20},
 		{Title: "Status", Width: 20},
-		{Title: "Ports", Width: 10},
+		{Title: "Ports", Width: 20},
 		{Title: "Names", Width: 15},
 	}
 
@@ -231,7 +261,7 @@ func main() {
 	m := model{table: t, rows: rows}
 	m.table.SetStyles(s)
 
-	if _, err := tea.NewProgram(&m).Run(); err != nil { // Pass the address of `m` here
+	if _, err := tea.NewProgram(&m, tea.WithAltScreen()).Run(); err != nil { // Pass the address of `m` here
 		fmt.Println("Error running program:", err)
 		os.Exit(1)
 	}
