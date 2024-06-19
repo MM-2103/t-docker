@@ -17,6 +17,7 @@ var baseStyle = lipgloss.NewStyle().
 
 type model struct {
 	table table.Model
+	rows  []table.Row
 }
 
 type DockerPS struct {
@@ -49,13 +50,13 @@ func parseDockerPSOutput(output string) []DockerPS {
 		}
 		fields := strings.Split(line, "\t")
 		dockerPS := DockerPS{
-			ContainerID: fields[0],
-			Image:       fields[1],
-			Command:     fields[2],
-			Created:     fields[3],
-			Status:      fields[4],
-			Ports:       fields[5],
-			Names:       fields[6],
+			ContainerID: strings.TrimSpace(fields[0]),
+			Image:       strings.TrimSpace(fields[1]),
+			Command:     strings.TrimSpace(fields[2]),
+			Created:     strings.TrimSpace(fields[3]),
+			Status:      strings.TrimSpace(fields[4]),
+			Ports:       strings.TrimSpace(fields[5]),
+			Names:       strings.TrimSpace(fields[6]),
 		}
 		dockerPSList = append(dockerPSList, dockerPS)
 	}
@@ -95,14 +96,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "q", "ctrl+c":
 			return m, tea.Quit
-		case "enter":
+		case "e":
 			if len(m.table.SelectedRow()) > 0 {
+				selectedID := strings.TrimSpace(m.table.SelectedRow()[0])
 				return m, func() tea.Msg {
-					c := exec.Command("docker", "exec", "-it", m.table.SelectedRow()[0], "bash")
+					c := exec.Command("docker", "exec", "-it", selectedID, "bash")
 					c.Stdin = os.Stdin
 					c.Stdout = os.Stdout
 					c.Stderr = os.Stderr
-					// Temporarily suspend the program to run the command
 					if output, err := c.CombinedOutput(); err != nil {
 						fmt.Printf("Error executing container: %s\nOutput: %s\n", err, string(output))
 					}
@@ -111,22 +112,26 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "s":
 			if len(m.table.SelectedRow()) > 0 {
+				selectedID := strings.TrimSpace(m.table.SelectedRow()[0])
 				return m, func() tea.Msg {
-					c := exec.Command("docker", "stop", m.table.SelectedRow()[0])
+					c := exec.Command("docker", "stop", selectedID)
 					if output, err := c.CombinedOutput(); err != nil {
 						fmt.Printf("Error stopping container: %s\nOutput: %s\n", err, string(output))
 					}
+					m.refreshTableData()
 					return nil
 				}
 			}
 		case "r":
 			if len(m.table.SelectedRow()) > 0 {
+				selectedID := strings.TrimSpace(m.table.SelectedRow()[0])
+				fmt.Printf("Attempting to restart container: '%s'\n", selectedID) // Debugging line
 				return m, func() tea.Msg {
-					fmt.Printf("Starting container: '%s'\n", m.table.SelectedRow()[0]) // Debugging line
-					c := exec.Command("docker", "restart", fmt.Sprintf("'%s'", m.table.SelectedRow()[0]))
+					c := exec.Command("docker", "restart", selectedID)
 					if output, err := c.CombinedOutput(); err != nil {
-						fmt.Printf("Error running container: %s\nOutput: %s\n", err, string(output))
+						fmt.Printf("Error restarting container: %s\nOutput: %s\n", err, string(output))
 					}
+					m.refreshTableData()
 					return nil
 				}
 			}
@@ -136,7 +141,35 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+func (m *model) refreshTableData() {
+	output, err := getDockerPSOutput()
+	if err != nil {
+		fmt.Println("Error running docker ps:", err)
+		return
+	}
+
+	dockerPSList := parseDockerPSOutput(output)
+	m.rows = dockerPSToTableRows(dockerPSList)
+	m.table.SetRows(m.rows)
+}
+
 func (m model) View() string {
+	// Apply styles conditionally based on the Ports column just before rendering
+	styledRows := make([]table.Row, len(m.rows))
+	for i, row := range m.rows {
+		if row[4] == "Exited" {
+			grayStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+			styledRow := make(table.Row, len(row))
+			for j := range row {
+				styledRow[j] = grayStyle.Render(row[j])
+			}
+			styledRows[i] = styledRow
+		} else {
+			styledRows[i] = row
+		}
+	}
+
+	m.table.SetRows(styledRows)
 	return baseStyle.Render(m.table.View()) + "\n"
 }
 
@@ -174,21 +207,9 @@ func main() {
 		BorderBottom(true).
 		Bold(false)
 
-	// Apply styles conditionally based on the Ports column
-	for i, row := range rows {
-		if row[5] == "" {
-			// Change the row style for stopped containers
-			grayStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
-			for j := range row {
-				row[j] = grayStyle.Render(row[j])
-			}
-			rows[i] = row
-		}
-	}
+	m := model{table: t, rows: rows}
+	m.table.SetStyles(s)
 
-	t.SetStyles(s)
-
-	m := model{t}
 	if _, err := tea.NewProgram(m).Run(); err != nil {
 		fmt.Println("Error running program:", err)
 		os.Exit(1)
