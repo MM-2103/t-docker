@@ -8,6 +8,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/table"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -20,8 +21,10 @@ var baseStyle = lipgloss.NewStyle().
 	BorderForeground(lipgloss.Color("240"))
 
 type model struct {
-	table table.Model
-	rows  []table.Row
+	table   table.Model
+	rows    []table.Row
+	spinner spinner.Model
+	loading bool
 }
 
 type DockerPS struct {
@@ -95,7 +98,30 @@ func extractPort(portMapping string) (string, error) {
 	return matches[1], nil
 }
 
-func (m model) Init() tea.Cmd { return nil }
+func initialModel() model {
+	s := spinner.New()
+	s.Spinner = spinner.Dot
+	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
+	return model{
+		spinner: s,
+		loading: true, // Start with the loading state
+	}
+}
+
+func (m model) Init() tea.Cmd {
+	return tea.Batch(m.spinner.Tick, loadDockerData)
+}
+
+func loadDockerData() tea.Msg {
+	output, err := getDockerPSOutput()
+	if err != nil {
+		return errMsg{err}
+	}
+	return dockerDataMsg(output)
+}
+
+type errMsg struct{ err error }
+type dockerDataMsg string
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
@@ -168,13 +194,24 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				url := fmt.Sprintf("http://localhost:%s", port)
 				exec.Command("xdg-open", url).Start()
 				return m, nil
-
 			}
 		}
+	case dockerDataMsg:
+		dockerPSList := parseDockerPSOutput(string(msg))
+		rows := dockerPSToTableRows(dockerPSList)
+		m.rows = rows
+		m.loading = false // Data has been loaded
+		m.table.SetRows(rows)
+
+	case errMsg:
+		m.loading = false
+		fmt.Printf("Error loading data: %s\n", msg.err)
+
 	case refreshMsg:
 		m.refreshTableData()
 	}
 	m.table, cmd = m.table.Update(msg)
+	m.spinner, cmd = m.spinner.Update(msg)
 	return m, cmd
 }
 
@@ -193,6 +230,9 @@ func (m *model) refreshTableData() {
 }
 
 func (m model) View() string {
+	if m.loading {
+		return fmt.Sprintf("\n\n %s Loading...", m.spinner.View())
+	}
 	styledRows := make([]table.Row, len(m.rows))
 	// Define the style for stopped containers
 	grayStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
@@ -221,14 +261,7 @@ func (m model) helpView() string {
 }
 
 func main() {
-	output, err := getDockerPSOutput()
-	if err != nil {
-		fmt.Println("Error running docker ps:", err)
-		os.Exit(1)
-	}
-
-	dockerPSList := parseDockerPSOutput(output)
-	rows := dockerPSToTableRows(dockerPSList)
+	m := initialModel()
 
 	columns := []table.Column{
 		{Title: "Container ID", Width: 20},
@@ -242,7 +275,6 @@ func main() {
 
 	t := table.New(
 		table.WithColumns(columns),
-		table.WithRows(rows),
 		table.WithFocused(true),
 		table.WithHeight(7),
 	)
@@ -258,10 +290,10 @@ func main() {
 		Background(lipgloss.Color("57")).
 		Bold(true)
 
-	m := model{table: t, rows: rows}
+	m.table = t
 	m.table.SetStyles(s)
 
-	if _, err := tea.NewProgram(&m, tea.WithAltScreen()).Run(); err != nil { // Pass the address of `m` here
+	if _, err := tea.NewProgram(&m, tea.WithAltScreen()).Run(); err != nil {
 		fmt.Println("Error running program:", err)
 		os.Exit(1)
 	}
